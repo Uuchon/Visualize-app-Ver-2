@@ -582,32 +582,106 @@ function drawSpectrumBar() {
 }
 
 function drawFrequencyGraph() {
-  const panelWidth = 280;
-  const panelHeight = 120;
+  const panelWidth = Math.min(380, width - 40);
+  const panelHeight = 150;
   const panelX = width - panelWidth - 20;
   const panelY = height - panelHeight - 110;
 
-  fill(245, 247, 250, 220);
+  // この小グラフは低域を見やすくするため、20〜1000 Hzに絞る。
+  // 周波数を対数間隔で分割し、各区間の最大値を表示する。
+  const minFreq = 20;
+  const maxFreq = 1000;
+  const bandCount = 48;
+  const plotLeft = panelX + 34;
+  const plotRight = panelX + panelWidth - 10;
+  const plotTop = panelY + 28;
+  const plotBottom = panelY + panelHeight - 24;
+  const plotWidth = plotRight - plotLeft;
+  const plotHeight = plotBottom - plotTop;
+  const nyquist = typeof sampleRate === 'function' ? sampleRate() / 2 : 22050;
+  const binCount = spectrumData.length;
+
+  push();
+
+  fill(245, 247, 250, 240);
   stroke(220);
   strokeWeight(1);
   rect(panelX, panelY, panelWidth, panelHeight, 8);
 
-  noFill();
-  stroke(currentColor.r, currentColor.g, currentColor.b);
-  strokeWeight(2);
-  beginShape();
-  for (let i = 0; i < spectrumData.length; i++) {
-    const x = map(i, 0, spectrumData.length, panelX + 10, panelX + panelWidth - 10);
-    const y = map(spectrumData[i], 0, 255, panelY + panelHeight - 10, panelY + 10);
-    vertex(x, y);
-  }
-  endShape();
+  // 横軸の周波数目盛り（対数配置）
+  const freqTicks = [20, 50, 100, 200, 500, 1000];
+  textSize(9);
+  textAlign(CENTER, TOP);
 
-  fill(100);
+  for (const freq of freqTicks) {
+    const t = Math.log(freq / minFreq) / Math.log(maxFreq / minFreq);
+    const tickX = plotLeft + t * plotWidth;
+
+    stroke(225);
+    line(tickX, plotTop, tickX, plotBottom);
+
+    noStroke();
+    fill(90);
+    text(freq >= 1000 ? '1k' : String(freq), tickX, plotBottom + 3);
+  }
+
+  // 縦軸は AnalyserNode の dB 表示範囲を目安にする。
+  // byte値 0〜255 は minDecibels〜maxDecibels に対応する。
+  for (const db of [-100, -80, -60, -40]) {
+    const level = constrain((db + 100) / 70, 0, 1);
+    const tickY = plotBottom - level * plotHeight;
+
+    stroke(230);
+    line(plotLeft, tickY, plotRight, tickY);
+
+    noStroke();
+    fill(100);
+    textAlign(RIGHT, CENTER);
+    text(`${db}`, plotLeft - 5, tickY);
+  }
+
+  if (binCount > 0) {
+    noStroke();
+
+    for (let band = 0; band < bandCount; band++) {
+      const f0 = minFreq * Math.pow(maxFreq / minFreq, band / bandCount);
+      const f1 = minFreq * Math.pow(maxFreq / minFreq, (band + 1) / bandCount);
+
+      // AnalyserNode の配列は 0 Hz から Nyquist までの周波数ビン。
+      let startBin = Math.max(1, Math.floor(f0 / nyquist * binCount));
+      let endBin = Math.min(
+        binCount,
+        Math.max(startBin + 1, Math.ceil(f1 / nyquist * binCount))
+      );
+
+      let maxValue = 0;
+      for (let bin = startBin; bin < endBin; bin++) {
+        maxValue = Math.max(maxValue, spectrumData[bin]);
+      }
+
+      const level = constrain(maxValue / 255, 0, 1);
+      const barHeight = level * plotHeight;
+      const barX = plotLeft + band * (plotWidth / bandCount);
+      const barWidth = Math.max(1, plotWidth / bandCount - 1);
+
+      const centerFreq = Math.sqrt(f0 * f1);
+      fill(hsbColor(hueFromFreq(centerFreq), 80, 90));
+      rect(barX, plotBottom - barHeight, barWidth, barHeight, 1);
+    }
+  }
+
   noStroke();
+  fill(70);
   textSize(11);
   textAlign(LEFT, TOP);
-  text('リアルタイムFFTスペクトル', panelX + 10, panelY + 8);
+  text('FFTスペクトル（20〜1000 Hz・対数軸／低域拡大）', panelX + 10, panelY + 7);
+
+  fill(100);
+  textSize(9);
+  textAlign(LEFT, TOP);
+  text('縦軸: FFTレベル（dB相当）', panelX + 10, panelY + 20);
+
+  pop();
 }
 
 function drawInfoText() {
